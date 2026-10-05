@@ -4,7 +4,7 @@
 
 By [TheRedStonee](https://www.theredstonee.de/) · kostenlos nutzbar
 
-> **English:** Self-hosted license management for your software. Create license keys, bind them to devices, block them and validate them through a signed HTTP API. One `docker compose up`, automatic HTTPS via Let's Encrypt. The panel is currently in German. Jump to [Quick start](#schnellstart).
+> **English:** Self-hosted license management for your software. Create license keys, bind them to devices, block them and validate them through a signed HTTP API. One `docker compose up`, automatic HTTPS via Let's Encrypt. The panel is available in German and English. Jump to [Quick start](#schnellstart).
 
 ---
 
@@ -24,6 +24,8 @@ By [TheRedStonee](https://www.theredstonee.de/) · kostenlos nutzbar
 - **Export, Import, Sicherung** — Lizenzen als CSV oder JSON, komplette Sicherung in einer Datei und Wiederherstellung im Panel
 - **Zwei-Faktor-Anmeldung** — Code aus einer Authenticator-App plus Notfall-Codes
 - **Dashboard** — aktive Lizenzen, Geräte, Prüfungen pro Tag, bald ablaufende Lizenzen
+- **Deutsch und Englisch** — Sprache im Assistenten wählen und später in den Einstellungen ändern; gilt für Panel, Kunden-Portal und E-Mails
+- **API-Doku zum Herunterladen** — als Markdown-Datei, deutsch und englisch, mit der Adresse deiner Installation
 - **Code-Beispiele** im Panel für cURL, JavaScript, Python, PHP, C# und Java (z. B. Minecraft-Plugins)
 - **Einrichtungs-Assistent** — Design und Akzentfarbe wählen, Domain verbinden, Admin-Konto anlegen; die Domain lässt sich später in den Einstellungen ändern
 - **Automatisches HTTPS** — Zertifikat von Let's Encrypt, wird von selbst verlängert
