@@ -1,0 +1,53 @@
+# TRS License — By TheRedStonee · https://www.theredstonee.de
+#
+# Start:   docker compose up -d
+# Danach:  http://<IP-deines-Servers> im Browser oeffnen und dem Assistenten folgen.
+# Den Setup-Code zeigt:  docker compose logs app | grep Setup-Code
+#
+# Vorher in der Datei .env ein eigenes Datenbank-Passwort setzen (siehe .env.example).
+services:
+  app:
+    image: ghcr.io/theredstonee/trs-license:latest
+    restart: unless-stopped
+    environment:
+      NUXT_DB_URL: postgres://trs:${DB_PASSWORD:?Bitte DB_PASSWORD in .env setzen}@db:5432/trs_license
+      TZ: ${TZ:-Europe/Berlin}
+    depends_on:
+      db:
+        condition: service_healthy
+    # Nicht nach aussen geoeffnet — erreichbar nur ueber Caddy.
+    expose: ["3000"]
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trs
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: trs_license
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trs -d trs_license"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  db:
+  caddy_data:
+  caddy_config:
