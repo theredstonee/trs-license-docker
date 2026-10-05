@@ -12,6 +12,8 @@ services:
     environment:
       NUXT_DB_URL: postgres://trs:${DB_PASSWORD:?Bitte DB_PASSWORD in .env setzen}@db:5432/trs_license
       TZ: ${TZ:-Europe/Berlin}
+      # Notausgang bei verlorener Zwei-Faktor-Anmeldung, siehe README (normalerweise leer).
+      TRS_RESET_2FA: ${TRS_RESET_2FA:-}
     depends_on:
       db:
         condition: service_healthy
