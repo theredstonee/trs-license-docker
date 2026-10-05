@@ -17,10 +17,15 @@ By [TheRedStonee](https://www.theredstonee.de/) · kostenlos nutzbar
 - **Offline-Lizenzen** — signierte Lizenzdateien für Rechner ohne Internet, dazu eine einstellbare Kulanzzeit, wenn dein Server nicht erreichbar ist
 - **Verwaltungs-API** — Lizenzen aus deinem Shop oder eigenen Skripten erstellen, ändern, sperren und löschen (API-Schlüssel mit Lese- oder Schreibrecht)
 - **Webhooks** — Ereignisse wie „Lizenz gesperrt“ oder „Gerät aktiviert“ an eigene Adressen, signiert und mit automatischer Wiederholung
+- **E-Mail-Versand** — Lizenzschlüssel und Ablauf-Erinnerungen über deinen eigenen Mailserver (SMTP)
+- **Kunden-Portal** — Kunden melden sich per Link aus der E-Mail an, sehen ihre Lizenzen, setzen Geräte selbst zurück und laden Offline-Dateien
+- **Zahlungen mit Stripe** — nach einer Zahlung entsteht die Lizenz von selbst und geht an den Käufer; bei Erstattung wird sie gesperrt
+- **Team & Rollen** — mehrere Konten als Inhaber, Admin oder „Nur lesen“, dazu ein Protokoll, wer wann was getan hat
+- **Export, Import, Sicherung** — Lizenzen als CSV oder JSON, komplette Sicherung in einer Datei und Wiederherstellung im Panel
 - **Zwei-Faktor-Anmeldung** — Code aus einer Authenticator-App plus Notfall-Codes
 - **Dashboard** — aktive Lizenzen, Geräte, Prüfungen pro Tag, bald ablaufende Lizenzen
 - **Code-Beispiele** im Panel für cURL, JavaScript, Python, PHP, C# und Java (z. B. Minecraft-Plugins)
-- **Einrichtungs-Assistent** — Design und Akzentfarbe wählen, Domain verbinden, Admin-Konto anlegen
+- **Einrichtungs-Assistent** — Design und Akzentfarbe wählen, Domain verbinden, Admin-Konto anlegen; die Domain lässt sich später in den Einstellungen ändern
 - **Automatisches HTTPS** — Zertifikat von Let's Encrypt, wird von selbst verlängert
 
 ## Voraussetzungen
@@ -41,7 +46,7 @@ Im Leerlauf brauchen App und Datenbank zusammen rund 60 MB RAM.
 
 ```bash
 mkdir trs-license && cd trs-license
-curl -fsSL -O "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/{docker-compose.yml,Caddyfile,install.sh}"
+for f in docker-compose.yml Caddyfile install.sh; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
 sudo bash install.sh
 ```
 
@@ -52,7 +57,7 @@ Das Skript installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, st
 
 ```bash
 mkdir trs-license && cd trs-license
-curl -fsSL -O "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/{docker-compose.yml,Caddyfile,.env.example}"
+for f in docker-compose.yml Caddyfile .env.example; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
 cp .env.example .env
 nano .env                # DB_PASSWORD setzen (lang und zufällig)
 docker compose up -d
