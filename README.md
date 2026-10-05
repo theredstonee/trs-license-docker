@@ -14,6 +14,10 @@ By [TheRedStonee](https://www.theredstonee.de/) · kostenlos nutzbar
 - **Produkte & Tarife** — Laufzeit, Geräteanzahl, Test-Tarife und frei benennbare Funktionen pro Tarif
 - **Geräte-Bindung** — jede Lizenz gilt für eine festgelegte Anzahl Geräte; Geräte lassen sich einzeln zurücksetzen
 - **Prüf-API** — `validate`, `activate`, `heartbeat`, `deactivate`; jede Antwort ist mit Ed25519 signiert, damit sie niemand fälschen kann
+- **Offline-Lizenzen** — signierte Lizenzdateien für Rechner ohne Internet, dazu eine einstellbare Kulanzzeit, wenn dein Server nicht erreichbar ist
+- **Verwaltungs-API** — Lizenzen aus deinem Shop oder eigenen Skripten erstellen, ändern, sperren und löschen (API-Schlüssel mit Lese- oder Schreibrecht)
+- **Webhooks** — Ereignisse wie „Lizenz gesperrt“ oder „Gerät aktiviert“ an eigene Adressen, signiert und mit automatischer Wiederholung
+- **Zwei-Faktor-Anmeldung** — Code aus einer Authenticator-App plus Notfall-Codes
 - **Dashboard** — aktive Lizenzen, Geräte, Prüfungen pro Tag, bald ablaufende Lizenzen
 - **Code-Beispiele** im Panel für cURL, JavaScript, Python, PHP, C# und Java (z. B. Minecraft-Plugins)
 - **Einrichtungs-Assistent** — Design und Akzentfarbe wählen, Domain verbinden, Admin-Konto anlegen
@@ -96,6 +100,28 @@ curl -X POST https://license.deinefirma.de/api/v1/activate \
 
 Fertige Beispiele für sechs Sprachen und den öffentlichen Schlüssel zum Prüfen der Signatur findest du im Panel unter **API & Beispiele**.
 
+### Lizenzen automatisch verwalten
+
+Lege im Panel unter **API-Schlüssel** einen Schlüssel an und rufe damit die Verwaltungs-API auf:
+
+```bash
+curl -X POST https://license.deinefirma.de/api/v1/licenses \
+  -H "Authorization: Bearer trsl_DEIN_SCHLUESSEL" \
+  -H "Content-Type: application/json" \
+  -d '{"product":"mein-produkt","plan":"Standard","customer":{"email":"kunde@beispiel.de"}}'
+```
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| `GET` | `/api/v1/licenses` | Lizenzen auflisten und filtern |
+| `POST` | `/api/v1/licenses` | Lizenzen erzeugen |
+| `GET` | `/api/v1/licenses/{key}` | Eine Lizenz mit ihren Geräten |
+| `PATCH` | `/api/v1/licenses/{key}` | Sperren, verlängern, ändern |
+| `DELETE` | `/api/v1/licenses/{key}` | Lizenz löschen |
+| `DELETE` | `/api/v1/licenses/{key}/devices/{hwid}` | Gerät zurücksetzen |
+| `GET` | `/api/v1/products` | Produkte und Tarife |
+
+
 ## Betrieb
 
 **Aktualisieren**
@@ -125,9 +151,18 @@ gunzip -c backup-2026-10-05.sql.gz | docker compose exec -T db psql -U trs trs_l
 docker compose logs -f app
 ```
 
+**Zwei-Faktor-Anmeldung verloren?** Handy weg und keine Notfall-Codes mehr: einmal mit zurückgesetzter 2FA starten, danach normal.
+
+```bash
+TRS_RESET_2FA=deinbenutzername docker compose up -d app
+docker compose up -d app
+```
+
 ## Sicherheit
 
 - Passwörter mit bcrypt, Sitzungen als httpOnly-Cookie, HTTPS wird erzwungen, sobald eine Domain eingerichtet ist
+- Zwei-Faktor-Anmeldung per Authenticator-App; nach mehreren Fehlversuchen wird die Anmeldung vorübergehend gesperrt
+- API-Schlüssel werden nur als Fingerabdruck gespeichert; Webhooks an Adressen im privaten Netz sind gesperrt
 - Der Setup-Code aus dem Container-Log schützt eine frische Installation, bis du sie eingerichtet hast
 - App und Datenbank sind nicht direkt aus dem Internet erreichbar, nur über den HTTPS-Proxy
 - Der Container läuft nicht als root
