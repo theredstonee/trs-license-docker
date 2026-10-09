@@ -39,7 +39,7 @@ By [TheRedStonee](https://www.theredstonee.de/) · kostenlos nutzbar
 | Speicher | 5 GB frei | 10 GB |
 
 - Linux-Server (Debian oder Ubuntu) mit Root-Zugriff
-- Port **80** und **443** von außen erreichbar
+- Port **80** und **443** von außen erreichbar — oder ein schon laufender nginx/Apache, hinter den sich TRS License hängt (siehe [Hinter deinem eigenen Webserver](#hinter-deinem-eigenen-webserver))
 - Für HTTPS: eine (Sub-)Domain, deren DNS-A-Eintrag auf den Server zeigt
 
 Im Leerlauf brauchen App und Datenbank zusammen rund 60 MB RAM.
@@ -48,7 +48,7 @@ Im Leerlauf brauchen App und Datenbank zusammen rund 60 MB RAM.
 
 ```bash
 mkdir trs-license && cd trs-license
-for f in docker-compose.yml Caddyfile install.sh; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
+for f in docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
 sudo bash install.sh
 ```
 
@@ -59,7 +59,7 @@ Das Skript installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, st
 
 ```bash
 mkdir trs-license && cd trs-license
-for f in docker-compose.yml Caddyfile .env.example; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
+for f in docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile .env.example; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
 cp .env.example .env
 nano .env                # DB_PASSWORD setzen (lang und zufällig)
 docker compose up -d
@@ -76,6 +76,18 @@ Im Assistenten gibst du deine Domain ein. Er zeigt dir die erkannte Server-IP un
 - Lege einen **A-Eintrag** auf die IP deines Servers an.
 - Bei **Cloudflare**: Proxy ausschalten (graue Wolke), sonst kann das Zertifikat nicht ausgestellt werden.
 - Du nutzt schon einen eigenen Reverse-Proxy (nginx, Traefik, Cloudflare Tunnel)? Wähle im Assistenten „Hinter eigenem Proxy“. Der Proxy muss `X-Forwarded-Proto` und `X-Forwarded-For` setzen.
+
+### Hinter deinem eigenen Webserver
+
+Läuft auf dem Server schon nginx, Apache oder ein Panel wie Plesk auf Port 80/443, merkt `install.sh` das und richtet TRS License **ohne eigenen Caddy** ein:
+
+- Die App bekommt einen freien Port, der nur auf `127.0.0.1` hört (z. B. `127.0.0.1:8080`).
+- Für deine Domain legt der Installer auf Nachfrage den **Virtual Host** in nginx oder Apache an (vorhandene Datei wird gesichert, Konfiguration geprüft, Webserver neu geladen) und holt per `certbot` das Zertifikat.
+- Im Assistenten ist „Hinter eigenem Proxy“ mit deiner Domain dann schon vorgewählt; die Vorlage für den Virtual Host findest du auch im Panel unter Einstellungen → Verbindung.
+
+Ohne Nachfragen geht es mit Schaltern: `sudo bash install.sh --port 8080 --domain license.deinefirma.de --email du@deinefirma.de` (`--no-vhost` lässt den Webserver unangetastet, `--caddy` erzwingt den eigenen Caddy).
+
+Von Hand: in der `.env` statt `compose.caddy.yml` die Datei `compose.port.yml` eintragen und `TRS_PORT` setzen (siehe `.env.example`), dann `docker compose up -d`. Dein Webserver muss `Host`, `X-Forwarded-Proto` und `X-Forwarded-For` durchreichen.
 
 ## Deine Software anbinden
 
@@ -138,7 +150,7 @@ cd trs-license
 docker compose pull && docker compose up -d
 ```
 
-Die Datenbank wird beim Start automatisch auf den neuen Stand gebracht.
+Die Datenbank wird beim Start automatisch auf den neuen Stand gebracht. Eine Installation von vor Version 1.3.1 (Caddy stand noch direkt in `docker-compose.yml`) läuft unverändert weiter — die neuen Compose-Dateien brauchst du nur für Neuinstallationen oder für den Wechsel in den Port-Modus.
 
 **Sichern**
 

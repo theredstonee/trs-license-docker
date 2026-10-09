@@ -1,8 +1,13 @@
 # TRS License — By TheRedStonee · https://www.theredstonee.de
 #
 # Start:   docker compose up -d
-# Danach:  http://<IP-deines-Servers> im Browser oeffnen und dem Assistenten folgen.
+# Danach:  die Adresse aus der Installation im Browser oeffnen und dem Assistenten folgen.
 # Den Setup-Code zeigt:  docker compose logs app | grep Setup-Code
+#
+# Diese Datei enthaelt nur App und Datenbank. Wie das Panel nach aussen kommt, legt COMPOSE_FILE
+# in der .env fest (install.sh setzt das automatisch):
+#   docker-compose.yml:compose.caddy.yml   eigener Caddy auf Port 80/443 mit automatischem HTTPS
+#   docker-compose.yml:compose.port.yml    nur ein Port auf 127.0.0.1 hinter deinem nginx/Apache
 #
 # Vorher in der Datei .env ein eigenes Datenbank-Passwort setzen (siehe .env.example).
 services:
@@ -17,7 +22,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Nicht nach aussen geoeffnet — erreichbar nur ueber Caddy.
+    # Nicht direkt nach aussen geoeffnet — erreichbar nur ueber Caddy oder den Port aus compose.port.yml.
     expose: ["3000"]
 
   db:
@@ -35,21 +40,5 @@ services:
       timeout: 3s
       retries: 20
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-
 volumes:
   db:
-  caddy_data:
-  caddy_config:
