@@ -1,0 +1,18 @@
+{
+  "version": "1.4.0",
+  "datum": "2026-10-24",
+  "hinweise": {
+    "de": [
+      "Testlizenz zum Selbstbedienen: /api/v1/trial, je Gerät und E-Mail nur einmal",
+      "Update-Knopf im Panel (Version unten links), Update-Dienst über install.sh",
+      "Neuer Installer: Einzeiler, farbig, Deutsch/Englisch, holt aktuelle Compose-Dateien",
+      "Sicherheits-Update für die Eingabeprüfung (zod)"
+    ],
+    "en": [
+      "Self-service trial license: /api/v1/trial, only once per device and e-mail",
+      "Update button in the panel (version at the bottom left), update service via install.sh",
+      "New installer: one-liner, colourful, German/English, fetches current compose files",
+      "Security update for input validation (zod)"
+    ]
+  }
+}

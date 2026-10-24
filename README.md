@@ -47,12 +47,10 @@ Im Leerlauf brauchen App und Datenbank zusammen rund 60 MB RAM.
 ## Schnellstart
 
 ```bash
-mkdir trs-license && cd trs-license
-for f in docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh; do curl -fsSLO "https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/$f"; done
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/install.sh | sudo bash
 ```
 
-Das Skript installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, startet alles und zeigt dir am Ende die Adresse und den **Setup-Code**. Öffne die Adresse im Browser und folge dem Assistenten.
+Das Skript legt alles nach **`/opt/trs-license`** (anderer Ordner: `curl … | sudo TRS_DIR=/srv/trs-license bash`), installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, startet alles, richtet den Update-Dienst ein und zeigt dir am Ende die Adresse und den **Setup-Code**. Öffne die Adresse im Browser und folge dem Assistenten. Sprache des Installers: Deutsch oder Englisch (`--lang en`).
 
 <details>
 <summary>Lieber von Hand?</summary>
@@ -140,17 +138,29 @@ curl -X POST https://license.deinefirma.de/api/v1/licenses \
 | `DELETE` | `/api/v1/licenses/{key}/devices/{hwid}` | Gerät zurücksetzen |
 | `GET` | `/api/v1/products` | Produkte und Tarife |
 
+### Testlizenz zum Selbstbedienen
+
+Markierst du einen Tarif als **Test** (z. B. 5 Tage), kann sich deine Software beim ersten Start selbst eine Testlizenz holen — ohne API-Schlüssel. Jedes Gerät und jede E-Mail-Adresse bekommt je Produkt nur eine:
+
+```bash
+curl -X POST https://license.deinefirma.de/api/v1/trial   -H "Content-Type: application/json"   -d '{"product":"mein-produkt","hwid":"PC-123","email":"kunde@beispiel.de"}'
+```
+
+Die Antwort ist signiert wie bei `activate`, das Gerät ist schon aktiviert, und sie enthält den Schlüssel. Schon genutzt → Code `TRIAL_USED`.
+
 
 ## Betrieb
 
 **Aktualisieren**
 
+Im Panel unten links steht die Version — ein roter Punkt zeigt eine neue an. Ein Klick zeigt die Neuerungen, **„Jetzt aktualisieren“** spielt sie ein (nur der Inhaber). Das erledigt ein kleiner Dienst auf dem Server, den `install.sh` einrichtet; ältere Installationen bekommen ihn mit einem erneuten `sudo bash install.sh` im Installationsordner. Von Hand geht es weiterhin so:
+
 ```bash
-cd trs-license
+cd /opt/trs-license   # bzw. dein Installationsordner
 docker compose pull && docker compose up -d
 ```
 
-Die Datenbank wird beim Start automatisch auf den neuen Stand gebracht. Eine Installation von vor Version 1.3.1 (Caddy stand noch direkt in `docker-compose.yml`) läuft unverändert weiter — die neuen Compose-Dateien brauchst du nur für Neuinstallationen oder für den Wechsel in den Port-Modus.
+Die Datenbank wird beim Start automatisch auf den neuen Stand gebracht. Ein zweiter Aufruf von `install.sh` holt außerdem die aktuellen Compose-Dateien (die alten bleiben als `*.bak-<Datum>` liegen). Eine Installation von vor Version 1.3.1 (Caddy stand noch direkt in `docker-compose.yml`) läuft unverändert weiter — die neuen Compose-Dateien brauchst du nur für Neuinstallationen oder für den Wechsel in den Port-Modus.
 
 **Sichern**
 
