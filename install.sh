@@ -255,7 +255,7 @@ if [ "$MODUS" = "port" ] && [ -n "$DOMAIN" ] && [ "$VHOST" = "ja" ]; then
   elif command -v httpd >/dev/null 2>&1; then webserver="httpd"
   fi
   # Zeigt schon ein Eintrag auf diesen Port (zweiter Aufruf)? Dann nichts neu anlegen.
-  if [ -n "$webserver" ] && grep -RlsE "(proxy_pass|ProxyPass[[:space:]]+/)[[:space:]]+http://(127\.0\.0\.1|localhost):${PORT}(/|;|[[:space:]]|$)" /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/apache2/sites-enabled /etc/httpd/conf.d 2>/dev/null | grep -q .; then
+  if [ -n "$webserver" ] && grep -RlsE "(proxy_pass|ProxyPass[[:space:]]+/)[[:space:]]+http://(127\.0\.0\.1|localhost):${PORT}(/|;|[[:space:]]|$)" /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/apache2/sites-enabled /etc/httpd/conf.d 2>/dev/null | grep -q . || [ "${PIPESTATUS[1]:-1}" = "0" ]; then
     vhost_angelegt="vorhanden"; https_ok=1; webserver=""
   fi
   if [ -n "$webserver" ] && ja "$(s "Virtual Host fuer $DOMAIN in $webserver anlegen (Backup vorhandener Dateien, Konfigtest, Neuladen)?" "Create a virtual host for $DOMAIN in $webserver (backup of existing files, config test, reload)?")" "j"; then
