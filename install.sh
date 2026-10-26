@@ -124,7 +124,7 @@ wer_lauscht() { ss -ltnpH "sport = :$1" 2>/dev/null | grep -o 'users:(("[^"]*"' 
 # 7. Update-Dienst: der Knopf „Jetzt aktualisieren“ im Panel legt update/.update-anfrage ab, ein systemd-Path-Dienst
 #    holt dann die aktuellen Dateien + das neue Image und startet neu. So braucht die App keinen Zugriff auf Docker.
 updater_einrichten() {
-  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] || return 0
+  DIENST_GRUND=""
   cat > /usr/local/bin/trs-license-update.neu <<SKRIPT
 #!/usr/bin/env bash
 # TRS License — Update auf Anfrage aus dem Panel (angelegt von install.sh, systemd: trs-license-update.path)
@@ -156,17 +156,28 @@ else status fehler "\$(kurz "\$out")"; fi
 SKRIPT
   # erst fertig schreiben, dann umbenennen: ein gerade laufender Dienst liest so seine alte Fassung zu Ende
   chmod 755 /usr/local/bin/trs-license-update.neu && mv -f /usr/local/bin/trs-license-update.neu /usr/local/bin/trs-license-update
-  printf '%s\n' "[Unit]" "Description=TRS License: Update-Anfrage aus dem Panel" "[Path]" "PathExists=$PWD/update/.update-anfrage" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/trs-license-update.path
-  printf '%s\n' "[Unit]" "Description=TRS License aktualisieren" "[Service]" "Type=oneshot" "ExecStart=/usr/local/bin/trs-license-update" > /etc/systemd/system/trs-license-update.service
+  local ausloeser=""
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    printf '%s\n' "[Unit]" "Description=TRS License: Update-Anfrage aus dem Panel" "[Path]" "PathExists=$PWD/update/.update-anfrage" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/trs-license-update.path
+    printf '%s\n' "[Unit]" "Description=TRS License aktualisieren" "[Service]" "Type=oneshot" "ExecStart=/usr/local/bin/trs-license-update" > /etc/systemd/system/trs-license-update.service
+    if systemctl daemon-reload && systemctl enable --now trs-license-update.path >/dev/null 2>&1; then ausloeser="systemd"; rm -f /etc/cron.d/trs-license-update; fi
+  fi
+  # Ohne systemd (z. B. Container-Server, Alpine): cron schaut jede Minute nach einer Anfrage
+  if [ -z "$ausloeser" ] && [ -d /etc/cron.d ] && { pgrep -x cron >/dev/null 2>&1 || pgrep -x crond >/dev/null 2>&1; }; then
+    printf '%s\n' "# TRS License: Update-Anfrage aus dem Panel (angelegt von install.sh, ohne systemd)" "* * * * * root [ -f \"$PWD/update/.update-anfrage\" ] && /usr/local/bin/trs-license-update >/dev/null 2>&1" > /etc/cron.d/trs-license-update
+    chmod 644 /etc/cron.d/trs-license-update; ausloeser="cron"
+  fi
+  [ -n "$ausloeser" ] || { DIENST_GRUND="$(s "Weder systemd noch cron laufen auf diesem Server – ohne einen davon kann der Knopf im Panel nichts ausloesen." "Neither systemd nor cron is running on this server – without one the panel button cannot trigger anything.")"; return 1; }
   printf 'TRS License Update-Dienst\naktionen=update\nstand=2\n' > update/.updater && chown 1000:1000 update/.updater 2>/dev/null || true
-  systemctl daemon-reload && systemctl enable --now trs-license-update.path >/dev/null 2>&1 || return 0
-  say "==> Update-Dienst eingerichtet (Panel → Version unten links → „Jetzt aktualisieren“)" "==> Update service set up (panel → version at the bottom left → “Update now”)"
+  say "==> Update-Dienst eingerichtet ($ausloeser; Panel → Version unten links → „Jetzt aktualisieren“)" "==> Update service set up ($ausloeser; panel → version at the bottom left → “Update now”)"
 }
+
 
 # Nur den Update-Dienst neu einrichten (update.sh ruft das nach jedem Update auf) — ohne Fragen, sonst bleibt alles
 if [ -n "$NUR_DIENST" ]; then
   mkdir -p update && chown 1000:1000 update 2>/dev/null || true
-  [ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten
+  [ "${TRS_DRY_RUN:-}" = "1" ] && exit 0
+  updater_einrichten || { say "FEHLER: Update-Dienst nicht eingerichtet: $DIENST_GRUND" "ERROR: update service not set up: $DIENST_GRUND"; exit 1; }
   exit 0
 fi
 
@@ -264,7 +275,7 @@ say "==> Image wird geladen und gestartet …" "==> Pulling the image and starti
 if [ -d .output ]; then docker compose up -d --build; else docker compose pull -q && docker compose up -d; fi
 
 # 7. Update-Dienst einrichten (Funktion steht oben)
-[ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten
+[ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten || say "    Update-Dienst nicht eingerichtet: $DIENST_GRUND" "    Update service not set up: $DIENST_GRUND"
 
 # 8. Virtual Host fuer die Domain in deinem Webserver (nur im Port-Modus, nur mit Domain)
 vhost_angelegt=""
