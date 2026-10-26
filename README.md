@@ -153,7 +153,15 @@ Die Antwort ist signiert wie bei `activate`, das Gerät ist schon aktiviert, und
 
 **Aktualisieren**
 
-Im Panel unten links steht die Version — ein roter Punkt zeigt eine neue an. Ein Klick zeigt die Neuerungen, **„Jetzt aktualisieren“** spielt sie ein (nur der Inhaber). Das erledigt ein kleiner Dienst auf dem Server, den `install.sh` einrichtet; ältere Installationen bekommen ihn mit einem erneuten `sudo bash install.sh` im Installationsordner. Von Hand geht es weiterhin so:
+Im Panel unten links steht die Version — ein roter Punkt zeigt eine neue an. Ein Klick zeigt die Neuerungen, **„Jetzt aktualisieren“** spielt sie ein (nur der Inhaber). Das erledigt ein kleiner Dienst auf dem Server: Er holt das neue Image, die aktuellen Compose-Dateien und bringt sich dabei selbst auf den neuesten Stand.
+
+Auf dem Server geht dasselbe mit einem Befehl — er richtet **nichts neu ein**, fragt nichts und lässt `.env` und Daten, wie sie sind (alte Dateien landen in `.sicherung/`). Installationen von vor diesem Befehl brauchen ihn **einmal**, danach reicht der Knopf:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/update.sh | sudo bash
+```
+
+Ganz von Hand, nur das Image:
 
 ```bash
 cd /opt/trs-license   # bzw. dein Installationsordner

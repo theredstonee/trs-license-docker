@@ -13,9 +13,11 @@
 #                       --caddy (Caddy erzwingen)  --no-vhost (keinen Virtual Host anlegen)
 # Ein zweiter Aufruf aktualisiert nur (Dateien + Image holen, neu starten) und fragt nichts mehr.
 # Dazu richtet er einen kleinen Update-Dienst ein: im Panel unten links „Jetzt aktualisieren“.
+# Nur aktualisieren (nichts neu einrichten, keine Fragen):
+#   curl -fsSL https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/update.sh | sudo bash
 set -euo pipefail
-QUELLE="https://raw.githubusercontent.com/theredstonee/trs-license-docker/main"
-DATEIEN="docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh .env.example README.md version.json"
+QUELLE="${TRS_QUELLE:-https://raw.githubusercontent.com/theredstonee/trs-license-docker/main}"   # TRS_QUELLE nur fuer Tests
+DATEIEN="docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh update.sh .env.example README.md version.json"
 # Ueber curl | bash gestartet (oder Dateien fehlen): alles nach /opt/trs-license holen und dort weitermachen
 if [ -f "$0" ] && [ -f "$(dirname "$0")/docker-compose.yml" ]; then
   cd "$(dirname "$0")"
@@ -27,7 +29,7 @@ else
   if { true </dev/tty; } 2>/dev/null; then exec bash ./install.sh "$@" </dev/tty; else exec bash ./install.sh "$@"; fi
 fi
 
-PORT=""; DOMAIN=""; EMAIL=""; MODUS=""; VHOST="ja"; SPR=""
+PORT=""; DOMAIN=""; EMAIL=""; MODUS=""; VHOST="ja"; SPR=""; NUR_DIENST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --lang) SPR="${2,,}"; shift 2 ;;
@@ -36,6 +38,7 @@ while [ $# -gt 0 ]; do
     --email) EMAIL="$2"; shift 2 ;;
     --caddy) MODUS="caddy"; shift ;;
     --no-vhost) VHOST="nein"; shift ;;
+    --dienst) NUR_DIENST="ja"; shift ;;   # nur den Update-Dienst neu einrichten (ruft update.sh auf)
     *) echo "Unbekannter Schalter / Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -117,6 +120,55 @@ belegt() { # lauscht etwas auf dem Port?
   else (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; fi
 }
 wer_lauscht() { ss -ltnpH "sport = :$1" 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | sed 's/users:(("//'; }
+
+# 7. Update-Dienst: der Knopf „Jetzt aktualisieren“ im Panel legt update/.update-anfrage ab, ein systemd-Path-Dienst
+#    holt dann die aktuellen Dateien + das neue Image und startet neu. So braucht die App keinen Zugriff auf Docker.
+updater_einrichten() {
+  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] || return 0
+  cat > /usr/local/bin/trs-license-update.neu <<SKRIPT
+#!/usr/bin/env bash
+# TRS License — Update auf Anfrage aus dem Panel (angelegt von install.sh, systemd: trs-license-update.path)
+set -uo pipefail
+DIR="$PWD"; UPD="$PWD/update"; QUELLE="$QUELLE"
+cd "\$DIR" || exit 1
+[ -f "\$UPD/.update-anfrage" ] || exit 0
+rm -f "\$UPD/.update-anfrage"
+status() { printf '{"status":"%s","zeit":"%s","meldung":"%s"}\n' "\$1" "\$(date -Is)" "\$2" > "\$UPD/.update-status"; chmod 644 "\$UPD/.update-status"; }
+kurz() { echo "\$1" | tail -3 | tr '\n"\\\\' '   '; }
+status laeuft ""
+# Erst das neueste update.sh holen: es bringt Dateien, Image und diesen Dienst selbst auf den neuesten Stand
+neu=\$(mktemp)
+if curl -fsSL --max-time 30 -o "\$neu" "\$QUELLE/update.sh?t=\$(date +%s)" 2>/dev/null && bash -n "\$neu" 2>/dev/null; then
+  TRS_QUELLE="\$QUELLE" exec bash "\$neu" --dir "\$DIR" --status "\$UPD/.update-status"
+fi
+rm -f "\$neu"
+# GitHub nicht erreichbar: wie bisher nur die Images
+# Aktuelle Dateien holen (alte als .bak) — neue Compose-Fassungen kommen so mit
+stempel=\$(date +%Y%m%d-%H%M%S)
+for f in docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh README.md version.json .env.example; do
+  if curl -fsS --max-time 20 -o "/tmp/trs-upd-\$f" "\$QUELLE/\$f" 2>/dev/null && ! cmp -s "/tmp/trs-upd-\$f" "\$f" 2>/dev/null; then
+    [ -f "\$f" ] && cp -a "\$f" "\$f.bak-\$stempel"; mv "/tmp/trs-upd-\$f" "\$f"
+  fi
+  rm -f "/tmp/trs-upd-\$f"
+done
+if out=\$(docker compose pull 2>&1 && docker compose up -d 2>&1); then status fertig ""
+else status fehler "\$(kurz "\$out")"; fi
+SKRIPT
+  # erst fertig schreiben, dann umbenennen: ein gerade laufender Dienst liest so seine alte Fassung zu Ende
+  chmod 755 /usr/local/bin/trs-license-update.neu && mv -f /usr/local/bin/trs-license-update.neu /usr/local/bin/trs-license-update
+  printf '%s\n' "[Unit]" "Description=TRS License: Update-Anfrage aus dem Panel" "[Path]" "PathExists=$PWD/update/.update-anfrage" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/trs-license-update.path
+  printf '%s\n' "[Unit]" "Description=TRS License aktualisieren" "[Service]" "Type=oneshot" "ExecStart=/usr/local/bin/trs-license-update" > /etc/systemd/system/trs-license-update.service
+  printf 'TRS License Update-Dienst\naktionen=update\nstand=2\n' > update/.updater && chown 1000:1000 update/.updater 2>/dev/null || true
+  systemctl daemon-reload && systemctl enable --now trs-license-update.path >/dev/null 2>&1 || return 0
+  say "==> Update-Dienst eingerichtet (Panel → Version unten links → „Jetzt aktualisieren“)" "==> Update service set up (panel → version at the bottom left → “Update now”)"
+}
+
+# Nur den Update-Dienst neu einrichten (update.sh ruft das nach jedem Update auf) — ohne Fragen, sonst bleibt alles
+if [ -n "$NUR_DIENST" ]; then
+  mkdir -p update && chown 1000:1000 update 2>/dev/null || true
+  [ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten
+  exit 0
+fi
 
 say "==> TRS License wird eingerichtet" "==> Setting up TRS License"
 
@@ -211,39 +263,7 @@ mkdir -p update && chown 1000:1000 update 2>/dev/null || true
 say "==> Image wird geladen und gestartet …" "==> Pulling the image and starting …"
 if [ -d .output ]; then docker compose up -d --build; else docker compose pull -q && docker compose up -d; fi
 
-# 7. Update-Dienst: der Knopf „Jetzt aktualisieren“ im Panel legt update/.update-anfrage ab, ein systemd-Path-Dienst
-#    holt dann die aktuellen Dateien + das neue Image und startet neu. So braucht die App keinen Zugriff auf Docker.
-updater_einrichten() {
-  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] || return 0
-  cat > /usr/local/bin/trs-license-update <<SKRIPT
-#!/usr/bin/env bash
-# TRS License — Update auf Anfrage aus dem Panel (angelegt von install.sh, systemd: trs-license-update.path)
-set -uo pipefail
-DIR="$PWD"; UPD="$PWD/update"; QUELLE="$QUELLE"
-cd "\$DIR" || exit 1
-[ -f "\$UPD/.update-anfrage" ] || exit 0
-rm -f "\$UPD/.update-anfrage"
-status() { printf '{"status":"%s","zeit":"%s","meldung":"%s"}\n' "\$1" "\$(date -Is)" "\$2" > "\$UPD/.update-status"; chmod 644 "\$UPD/.update-status"; }
-kurz() { echo "\$1" | tail -3 | tr '\n"\\\\' '   '; }
-status laeuft ""
-# Aktuelle Dateien holen (alte als .bak) — neue Compose-Fassungen kommen so mit
-stempel=\$(date +%Y%m%d-%H%M%S)
-for f in docker-compose.yml compose.caddy.yml compose.port.yml Caddyfile install.sh README.md version.json .env.example; do
-  if curl -fsS --max-time 20 -o "/tmp/trs-upd-\$f" "\$QUELLE/\$f" 2>/dev/null && ! cmp -s "/tmp/trs-upd-\$f" "\$f" 2>/dev/null; then
-    [ -f "\$f" ] && cp -a "\$f" "\$f.bak-\$stempel"; mv "/tmp/trs-upd-\$f" "\$f"
-  fi
-  rm -f "/tmp/trs-upd-\$f"
-done
-if out=\$(docker compose pull 2>&1 && docker compose up -d 2>&1); then status fertig ""
-else status fehler "\$(kurz "\$out")"; fi
-SKRIPT
-  chmod 755 /usr/local/bin/trs-license-update
-  printf '%s\n' "[Unit]" "Description=TRS License: Update-Anfrage aus dem Panel" "[Path]" "PathExists=$PWD/update/.update-anfrage" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/trs-license-update.path
-  printf '%s\n' "[Unit]" "Description=TRS License aktualisieren" "[Service]" "Type=oneshot" "ExecStart=/usr/local/bin/trs-license-update" > /etc/systemd/system/trs-license-update.service
-  printf 'TRS License Update-Dienst\naktionen=update\n' > update/.updater && chown 1000:1000 update/.updater 2>/dev/null || true
-  systemctl daemon-reload && systemctl enable --now trs-license-update.path >/dev/null 2>&1 || return 0
-  say "==> Update-Dienst eingerichtet (Panel → Version unten links → „Jetzt aktualisieren“)" "==> Update service set up (panel → version at the bottom left → “Update now”)"
-}
+# 7. Update-Dienst einrichten (Funktion steht oben)
 [ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten
 
 # 8. Virtual Host fuer die Domain in deinem Webserver (nur im Port-Modus, nur mit Domain)
