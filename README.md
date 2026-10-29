@@ -87,6 +87,8 @@ Ohne Nachfragen geht es mit Schaltern: `sudo bash install.sh --port 8080 --domai
 
 Von Hand: in der `.env` statt `compose.caddy.yml` die Datei `compose.port.yml` eintragen und `TRS_PORT` setzen (siehe `.env.example`), dann `docker compose up -d`. Dein Webserver muss `Host`, `X-Forwarded-Proto` und `X-Forwarded-For` durchreichen.
 
+Ohne Domain fragt der Installer, ob die Einrichtung vorübergehend unter `http://<Server-IP>` laufen soll (eigener Eintrag nur für die IP, wird danach wieder entfernt). Trägst du im Assistenten eine Domain ein, legt er danach Virtual Host und Zertifikat an. Bei **Nein** ist TRS License direkt unter `http://<Server-IP>:<Port>` erreichbar — passend z. B. für einen Nginx Proxy Manager auf einem anderen Gerät.
+
 ## Deine Software anbinden
 
 ```bash
@@ -194,6 +196,14 @@ docker compose logs -f app
 TRS_RESET_2FA=deinbenutzername docker compose up -d app
 docker compose up -d app
 ```
+
+## Entfernen
+
+```bash
+sudo bash /opt/trs-license/install.sh --deinstallieren
+```
+
+Stoppt und entfernt die Container und die Webserver-Einträge von TRS License (gesichert nach `/root/trs-license-backup`). Datenbank und Ordner werden nur nach einer Rückfrage und dem Eintippen von `loeschen` gelöscht; sonst bleiben sie für einen Neustart erhalten.
 
 ## Sicherheit
 
