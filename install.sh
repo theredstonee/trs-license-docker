@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # TRS License — Installation auf einem Linux-Server (Debian/Ubuntu, auch RHEL-Verwandte).
+# Entfernen / Uninstall:  sudo bash /opt/trs-license/install.sh --uninstall
 # Einzeiler / One-liner (installiert nach /opt/trs-license, anderer Ordner: TRS_DIR=/pfad):
 #   curl -fsSL https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/install.sh | sudo bash
 # Oder im Ordner mit den Dateien:  sudo bash install.sh
@@ -110,7 +111,7 @@ else
   if { true </dev/tty; } 2>/dev/null; then exec bash ./install.sh "$@" </dev/tty; else exec bash ./install.sh "$@"; fi
 fi
 
-PORT=""; DOMAIN=""; EMAIL=""; MODUS=""; VHOST="ja"; SPR=""; NUR_DIENST=""
+PORT=""; DOMAIN=""; EMAIL=""; MODUS=""; VHOST="ja"; WEG=""; SPR=""; NUR_DIENST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --lang) SPR="${2,,}"; shift 2 ;;
@@ -119,6 +120,7 @@ while [ $# -gt 0 ]; do
     --email) EMAIL="$2"; shift 2 ;;
     --caddy) MODUS="caddy"; shift ;;
     --no-vhost) VHOST="nein"; shift ;;
+    --deinstallieren|--uninstall) WEG="ja"; shift ;;
     --dienst) NUR_DIENST="ja"; shift ;;   # nur den Update-Dienst neu einrichten (ruft update.sh auf)
     *) echo "Unbekannter Schalter / Unknown option: $1"; exit 1 ;;
   esac
@@ -201,6 +203,58 @@ belegt() { # lauscht etwas auf dem Port?
   else (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; fi
 }
 wer_lauscht() { ss -ltnpH "sport = :$1" 2>/dev/null | grep -o 'users:(("[^"]*"' | head -1 | sed 's/users:(("//'; }
+
+# Deinstallieren: Container weg, Webserver-Eintraege weg (mit Backup), auf Wunsch auch alle Daten und der Ordner
+if [ -n "$WEG" ]; then
+  say "==> TRS License entfernen (Ordner: $PWD)" "==> Removing TRS License (folder: $PWD)"
+  daten="nein"
+  if ja "    $(s "Auch die Datenbank (alle Lizenzen, Kunden, Schluessel) loeschen? Das laesst sich nicht rueckgaengig machen." "Also delete the database (all licenses, customers, keys)? This cannot be undone.")" "n"; then
+    wort=$(s loeschen delete)
+    bestaetigt=$(frage "    $(s "Zur Bestaetigung bitte  $wort  eintippen" "To confirm, please type  $wort")" "")
+    [ "$bestaetigt" = "$wort" ] && daten="ja" || say "    Nicht bestaetigt — die Datenbank bleibt erhalten." "    Not confirmed — the database is kept."
+  fi
+  if [ -f docker-compose.yml ] && command -v docker >/dev/null 2>&1; then
+    if [ "$daten" = "ja" ]; then docker compose down -v --remove-orphans || true; else docker compose down --remove-orphans || true; fi
+    docker image rm ghcr.io/theredstonee/trs-license:latest >/dev/null 2>&1 || true
+  fi
+  # Update-Dienst
+  rm -f /etc/cron.d/trs-license-update
+  if [ -f /etc/systemd/system/trs-license-update.path ]; then
+    systemctl disable --now trs-license-update.path >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/trs-license-update.path /etc/systemd/system/trs-license-update.service /usr/local/bin/trs-license-update
+    systemctl daemon-reload || true
+  fi
+  # Unraid: Dienst + Zeitplan auf dem USB-Stick
+  if [ -d /boot/config/plugins/trs-license ]; then
+    rm -rf /boot/config/plugins/trs-license /boot/config/plugins/dynamix/trs-license-update.cron /usr/local/bin/trs-license-update
+    [ -x /usr/local/sbin/update_cron ] && /usr/local/sbin/update_cron >/dev/null 2>&1
+  fi
+  stempel=$(date +%Y%m%d-%H%M%S); neu_laden=""
+  for datei in /etc/nginx/sites-enabled/trs-license.conf /etc/nginx/sites-enabled/trs-license-setup.conf /etc/nginx/sites-available/trs-license.conf /etc/nginx/sites-available/trs-license-setup.conf \
+               /etc/nginx/conf.d/trs-license.conf /etc/nginx/conf.d/trs-license-setup.conf /etc/apache2/sites-enabled/trs-license.conf /etc/apache2/sites-enabled/trs-license-setup.conf \
+               /etc/apache2/sites-available/trs-license.conf /etc/apache2/sites-available/trs-license-setup.conf /etc/httpd/conf.d/trs-license.conf /etc/httpd/conf.d/trs-license-setup.conf; do
+    if [ -L "$datei" ]; then rm -f "$datei"; neu_laden="ja"
+    elif [ -f "$datei" ]; then mkdir -p /root/trs-license-backup && cp -a "$datei" "/root/trs-license-backup/$(basename "$datei").bak-$stempel" && rm -f "$datei"; neu_laden="ja"; fi
+  done
+  if [ -n "$neu_laden" ]; then
+    if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then systemctl reload nginx 2>/dev/null || nginx -s reload; fi
+    if command -v apache2ctl >/dev/null 2>&1 && apache2ctl configtest >/dev/null 2>&1; then systemctl reload apache2; fi
+    say "==> Webserver-Eintraege entfernt (Sicherung in /root/trs-license-backup)." "==> Web server entries removed (backup in /root/trs-license-backup)."
+  fi
+  dom=$(sed -n 's/^TRS_PROXY_DOMAIN=//p' .env 2>/dev/null | tail -1 || true)
+  if [ -n "$dom" ] && command -v certbot >/dev/null 2>&1 && certbot certificates 2>/dev/null | grep -q "Certificate Name: $dom$"; then
+    ja "    $(s "Zertifikat fuer $dom auch loeschen?" "Also delete the certificate for $dom?")" "n" && certbot delete --cert-name "$dom" -n || true
+  fi
+  if [ "$daten" = "ja" ]; then
+    ordner="$PWD"; cd /
+    if ja "    $(s "Ordner $ordner auch loeschen (inkl. .env)?" "Also delete the folder $ordner (incl. .env)?")" "j"; then rm -rf "$ordner"; say "==> Ordner entfernt." "==> Folder removed."; fi
+    say "==> TRS License ist vollstaendig entfernt." "==> TRS License has been removed completely."
+  else
+    say "==> Container gestoppt und entfernt. Datenbank und dieser Ordner sind noch da —" "==> Containers stopped and removed. Database and this folder are still there —"
+    say "    neu starten mit  sudo bash install.sh  (gleiches Datenbank-Passwort aus der .env)." "    start again with  sudo bash install.sh  (same database password from .env)."
+  fi
+  exit 0
+fi
 
 # 7. Update-Dienst: der Knopf „Jetzt aktualisieren“ im Panel legt update/.update-anfrage ab, ein systemd-Path-Dienst
 #    holt dann die aktuellen Dateien + das neue Image und startet neu. So braucht die App keinen Zugriff auf Docker.
@@ -457,19 +511,29 @@ elif [ "$db_rc" = 1 ]; then say "    FEHLER: Das Datenbank-Passwort passt nicht 
 # 7. Update-Dienst einrichten (Funktion steht oben)
 [ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten || say "    Update-Dienst nicht eingerichtet: $DIENST_GRUND" "    Update service not set up: $DIENST_GRUND"
 
-# 8. Virtual Host fuer die Domain in deinem Webserver (nur im Port-Modus, nur mit Domain)
-vhost_angelegt=""
+# 8. Virtual Host fuer die Domain in deinem Webserver (nur im Port-Modus, nur mit Domain).
+#    Als Funktion: laeuft auch nach der Einrichtung ueber den Kurzzeit-Link (Schritt 11) mit der dort gewaehlten Domain.
+vhost_angelegt=""; fremd=""
+vhost_einrichten() {
 if [ "$MODUS" = "port" ] && [ -n "$DOMAIN" ] && [ "$VHOST" = "ja" ]; then
   webserver=""
   if command -v nginx >/dev/null 2>&1; then webserver="nginx"
   elif command -v apache2ctl >/dev/null 2>&1; then webserver="apache2"
   elif command -v httpd >/dev/null 2>&1; then webserver="httpd"
   fi
-  # Zeigt schon ein Eintrag auf diesen Port (zweiter Aufruf)? Dann nichts neu anlegen.
-  if [ -n "$webserver" ] && grep -RlsE "(proxy_pass|ProxyPass[[:space:]]+/)[[:space:]]+http://(127\.0\.0\.1|localhost):${PORT}(/|;|[[:space:]]|$)" /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/apache2/sites-enabled /etc/httpd/conf.d 2>/dev/null | grep -q . || [ "${PIPESTATUS[1]:-1}" = "0" ]; then
-    vhost_angelegt="vorhanden"; https_ok=1; webserver=""
+  # Gibt es fuer die Domain schon einen fremden Eintrag (anderer Dienst)? Dann nichts anfassen — sonst stritten sich
+  # zwei Eintraege um die Domain.
+  fremd=$(grep -RlsE "^[[:space:]]*(server_name|ServerName|ServerAlias)[[:space:]]+(.*[[:space:]])?${DOMAIN//./\\.}([[:space:];]|$)" /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/apache2/sites-enabled /etc/httpd/conf.d 2>/dev/null | grep -v 'trs-license' | head -1 || true)
+  # Zeigt der Eintrag schon auf TRS License (zweiter Aufruf)? Dann ist alles erledigt.
+  if [ -n "$fremd" ] && grep -qE "(proxy_pass|ProxyPass[[:space:]]+/)[[:space:]]+http://(127\.0\.0\.1|localhost):${PORT}(/|;|[[:space:]]|$)" "$fremd"; then
+    say "==> $DOMAIN zeigt schon auf TRS License ($fremd)." "==> $DOMAIN already points to TRS License ($fremd)."
+    fremd=""; webserver=""; vhost_angelegt="vorhanden"; https_ok=1
   fi
-  if [ -n "$webserver" ] && ja "$(s "Virtual Host fuer $DOMAIN in $webserver anlegen (Backup vorhandener Dateien, Konfigtest, Neuladen)?" "Create a virtual host for $DOMAIN in $webserver (backup of existing files, config test, reload)?")" "j"; then
+  if [ -n "$fremd" ]; then
+    say "==> Fuer $DOMAIN gibt es schon einen Eintrag: $fremd — den fasse ich nicht an." "==> There is already an entry for $DOMAIN: $fremd — I will not touch it."
+    webserver=""
+  fi
+  if [ -n "$webserver" ] && ja "==> $(s "Virtual Host fuer $DOMAIN in $webserver anlegen (Backup vorhandener Dateien, Konfigtest, Neuladen)?" "Create a virtual host for $DOMAIN in $webserver (backup of existing files, config test, reload)?")" "j"; then
     stempel=$(date +%Y%m%d-%H%M%S)
     if [ "$webserver" = "nginx" ]; then
       if [ -d /etc/nginx/sites-enabled ]; then datei=/etc/nginx/sites-available/trs-license.conf; link=/etc/nginx/sites-enabled/trs-license.conf
@@ -514,8 +578,8 @@ server {
         if tu httpd -t; then tu systemctl reload httpd; vhost_angelegt="$webserver"; else say "    FEHLER: httpd -t schlaegt fehl — $datei bitte pruefen." "    ERROR: httpd -t fails — please check $datei."; fi
       fi
     fi
-  elif [ -z "$webserver" ] && [ -z "$vhost_angelegt" ]; then
-    say "==> Keinen nginx/Apache gefunden — die Vorlage fuer deinen Webserver steht unten." "==> No nginx/Apache found — the template for your web server is below."
+  elif [ -z "$webserver" ] && [ -z "$fremd" ] && [ "$vhost_angelegt" != "vorhanden" ]; then
+    say "==> Keinen nginx/Apache gefunden — die Vorlage fuer deinen Webserver steht unten." "==> No nginx/Apache found — the template for your web server is shown below."
   fi
 
   # 9. Zertifikat per certbot (HTTP-01 ueber den gerade angelegten Virtual Host)
@@ -525,15 +589,15 @@ server {
     domain_ip=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)
     if [ -n "$meine_ip" ] && [ "$domain_ip" != "$meine_ip" ]; then
       say "==> $DOMAIN zeigt auf '${domain_ip:-nichts}', dieser Server hat $meine_ip — Zertifikat spaeter holen:" "==> $DOMAIN points to '${domain_ip:-nothing}', this server has $meine_ip — get the certificate later:"
-      say "    certbot --$plugin -d $DOMAIN --redirect" "    certbot --$plugin -d $DOMAIN --redirect"
-    elif ja "$(s "HTTPS-Zertifikat fuer $DOMAIN mit certbot holen (Let's Encrypt)?" "Get an HTTPS certificate for $DOMAIN with certbot (Let's Encrypt)?")" "j"; then
+      echo "    certbot --$plugin -d $DOMAIN --redirect"
+    elif ja "==> $(s "HTTPS-Zertifikat fuer $DOMAIN mit certbot holen (Let's Encrypt)?" "Get an HTTPS certificate for $DOMAIN with certbot (Let's Encrypt)?")" "j"; then
       if ! command -v certbot >/dev/null 2>&1; then
         if command -v apt-get >/dev/null 2>&1; then tu apt-get install -y -qq certbot "python3-certbot-$plugin"
         elif command -v dnf >/dev/null 2>&1; then tu dnf install -y -q certbot "python3-certbot-$plugin"
-        else say "    certbot fehlt und konnte nicht installiert werden — bitte von Hand: certbot --$plugin -d $DOMAIN --redirect" "    certbot is missing and could not be installed — please run manually: certbot --$plugin -d $DOMAIN --redirect"; fi
+        else say "    certbot fehlt und konnte nicht installiert werden — bitte von Hand: certbot --$plugin -d $DOMAIN --redirect" "    certbot is missing and could not be installed — please run by hand: certbot --$plugin -d $DOMAIN --redirect"; fi
       fi
       if command -v certbot >/dev/null 2>&1 || [ "${TRS_DRY_RUN:-}" = "1" ]; then
-        [ -n "$EMAIL" ] || EMAIL=$(frage "$(s "E-Mail fuer Ablauf-Hinweise von Let's Encrypt (leer = keine)" "E-mail for expiry notices from Let's Encrypt (empty = none)")" "")
+        [ -n "$EMAIL" ] || EMAIL=$(frage "    $(s "E-Mail fuer Ablauf-Hinweise von Let's Encrypt (leer = keine)" "Email for Let's Encrypt expiry notices (empty = none)")" "")
         if [ -n "$EMAIL" ]; then mail_arg=(-m "$EMAIL"); else mail_arg=(--register-unsafely-without-email); fi
         if tu certbot "--$plugin" -d "$DOMAIN" --redirect -n --agree-tos "${mail_arg[@]}"; then https_ok=1
         else say "    certbot hat nicht geklappt (Ausgabe oben). Spaeter nochmal: certbot --$plugin -d $DOMAIN --redirect" "    certbot did not work (output above). Try again later: certbot --$plugin -d $DOMAIN --redirect"; fi
@@ -541,6 +605,8 @@ server {
     fi
   fi
 fi
+}
+vhost_einrichten
 
 # 10. Auf die App warten und den Setup-Code zeigen
 say "==> Warte auf den Start …" "==> Waiting for the start …"
@@ -549,13 +615,14 @@ for n in $(seq 1 60); do
   for k in 0 1 2 3 4 5 6 7; do [ -t 1 ] && printf '\r  %s%s%s %s' "$R" "${SPIN[$(( (n * 8 + k) % ${#SPIN[@]} ))]}" "$N" "$(s "TRS License startet" "TRS License is starting") ($((n * 2)) s)"; sleep 0.25; done
 done
 [ -t 1 ] && printf '\r\033[K'
-# IP fuer die Adresse: die oeffentliche nur, wenn sie auf dem Server selbst liegt (VPS); sonst (hinter einem Router)
-# die IP, ueber die der Server ins Netz geht.
+# IP fuer Links und Kurzzeit-Eintrag: die oeffentliche nur, wenn sie auf dem Server selbst liegt (VPS).
+# Sonst steht der Server hinter einem Router (Heimnetz) — dann die IP, ueber die er ins Netz geht.
 ip_pub=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
 ip_lan=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1 || true)
 [ -n "$ip_lan" ] || ip_lan=$(hostname -I 2>/dev/null | awk '{print $1}')
+hinter_router=""
 if [ -n "$ip_pub" ] && ip -4 addr 2>/dev/null | grep -qF "inet ${ip_pub}/"; then ip="$ip_pub"
-elif [ -n "$ip_lan" ]; then ip="$ip_lan"
+elif [ -n "$ip_lan" ]; then ip="$ip_lan"; [ -n "$ip_pub" ] && [ "$ip_pub" != "$ip_lan" ] && hinter_router="ja"
 else ip="$ip_pub"; fi
 code=$(docker compose logs app 2>/dev/null | grep -o 'Setup-Code: *[A-Za-z0-9-]\{6,\}' | tail -1 | sed 's/.*: *//' || true)
 echo ""
@@ -565,11 +632,96 @@ elif docker compose logs app 2>/dev/null | grep -q 'bereit'; then
   say "    Schon eingerichtet — kein Setup-Code noetig." "    Already set up — no setup code needed."
 fi
 echo ""
-ziel_url=""
-if [ "$MODUS" = "port" ]; then
+
+# 11. Kurzzeit-Link: Port-Modus ohne Domain → die Einrichtung voruebergehend ueber http://<Server-IP> erlauben.
+#    Ein eigener Eintrag NUR fuer die IP (andere Domains im Webserver bleiben unberuehrt), geschuetzt durch
+#    den Setup-Code; nach der Einrichtung (oder bei Abbruch) wird er wieder entfernt. Wurde im Assistenten
+#    eine Domain eingetragen, bekommt sie danach ihren Virtual Host und das Zertifikat.
+setup_wert() { docker compose exec -T db psql -U trs -d trs_license -tAc "SELECT coalesce(value->>'$2', '') FROM settings WHERE key = '$1'" 2>/dev/null | tr -d '[:space:]'; }
+setup_fertig() { [ "$(setup_wert setup done)" = "true" ]; }
+kurz_datei=""; kurz_link=""; kurz_web=""; direkt_url=""
+direkt_freigeben() { # App direkt im Netz erreichbar: Port auf allen Schnittstellen statt nur 127.0.0.1
+  if grep -q '^TRS_BIND=' .env; then sed -i 's|^TRS_BIND=.*|TRS_BIND=0.0.0.0|' .env; else echo "TRS_BIND=0.0.0.0" >> .env; fi
+  tu docker compose up -d app >/dev/null 2>&1 || true
+  direkt_url="http://${ip}:${PORT}"
+  echo ""
+  say "==> TRS License ist jetzt direkt erreichbar:  ${direkt_url}" "==> TRS License is now directly reachable:  ${direkt_url}"
+  say "    Gib dort den Setup-Code von oben ein und waehle „Nur IP (ohne HTTPS)“. Eine Domain geht spaeter:  sudo bash install.sh --domain lizenz.deinefirma.de" "    Enter the setup code from above there and choose “IP only (no HTTPS)”. A domain works later:  sudo bash install.sh --domain license.example.com"
+  say "    Firewall: Port ${PORT}/tcp muss erreichbar sein." "    Firewall: port ${PORT}/tcp must be reachable."
+  [ -n "$hinter_router" ] && say "    Von ausserhalb deines Netzes nur mit Portweiterleitung im Router (${ip_pub}:${PORT} → ${ip}:${PORT}) — oder per Cloudflare Tunnel im Panel." "    From outside your network only with port forwarding in your router (${ip_pub}:${PORT} → ${ip}:${PORT}) — or via Cloudflare Tunnel in the panel."
+  return 0
+}
+kurz_weg() {
+  [ -n "$kurz_datei" ] || return 0
+  if [ "$kurz_web" = "apache2" ]; then a2dissite -q trs-license-setup.conf >/dev/null 2>&1 || true; fi
+  rm -f "$kurz_datei" ${kurz_link:+"$kurz_link"}
+  case "$kurz_web" in nginx) nginx -t >/dev/null 2>&1 && { systemctl reload nginx 2>/dev/null || nginx -s reload; } ;; apache2) systemctl reload apache2 ;; httpd) systemctl reload httpd ;; esac
+  say "==> Kurzzeit-Eintrag fuer http://${ip} wieder entfernt." "==> Temporary entry for http://${ip} removed again."
+  kurz_datei=""
+}
+# Kurzzeit-Link auch dann, wenn die Domain noch auf den alten Dienst zeigt (Einrichtung erst, dann Umzug)
+if [ "$MODUS" = "port" ] && [ -z "$vhost_angelegt" ] && { [ -z "$DOMAIN" ] || [ -n "$fremd" ]; } && [ "$VHOST" = "ja" ] && [[ "${ip:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${TRS_DRY_RUN:-}" != "1" ] && ! setup_fertig; then
+  if command -v nginx >/dev/null 2>&1; then kurz_web="nginx"
+  elif command -v apache2ctl >/dev/null 2>&1; then kurz_web="apache2"
+  elif command -v httpd >/dev/null 2>&1; then kurz_web="httpd"
+  fi
+  if [ -n "$kurz_web" ] && ja "==> $(s "Fuer die Einrichtung voruebergehend unter http://${ip} erreichbar machen? (eigener Eintrag nur fuer die IP, wird danach entfernt — bei Nein direkt unter http://${ip}:${PORT})" "Make it reachable at http://${ip} temporarily for the setup? (own entry for the IP only, removed afterwards — if no, directly at http://${ip}:${PORT})")" "j"; then
+    if [ "$kurz_web" = "nginx" ]; then
+      if [ -d /etc/nginx/sites-enabled ]; then kurz_datei=/etc/nginx/sites-available/trs-license-setup.conf; kurz_link=/etc/nginx/sites-enabled/trs-license-setup.conf
+      else kurz_datei=/etc/nginx/conf.d/trs-license-setup.conf; fi
+      printf '%s\n' "# TRS License — nur fuer die Einrichtung, entfernt install.sh wieder" "server {" "    listen 80;" "    server_name ${ip}${hinter_router:+ $ip_pub};" "    client_max_body_size 0;" \
+        "    location / {" "        proxy_pass http://127.0.0.1:${PORT};" "        proxy_set_header Host \$host;" "        proxy_set_header X-Real-IP \$remote_addr;" \
+        "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;" "        proxy_set_header X-Forwarded-Proto \$scheme;" "    }" "}" > "$kurz_datei"
+      [ -n "$kurz_link" ] && ln -sf "$kurz_datei" "$kurz_link"
+      if nginx -t >/dev/null 2>&1; then systemctl reload nginx 2>/dev/null || nginx -s reload; else say "    nginx -t schlaegt fehl — Kurzzeit-Eintrag wieder entfernt." "    nginx -t fails — temporary entry removed again."; kurz_weg; fi
+    else
+      if [ "$kurz_web" = "apache2" ]; then kurz_datei=/etc/apache2/sites-available/trs-license-setup.conf; else kurz_datei=/etc/httpd/conf.d/trs-license-setup.conf; fi
+      printf '%s\n' "# TRS License — nur fuer die Einrichtung, entfernt install.sh wieder" "<VirtualHost *:80>" "    ServerName ${ip}" ${hinter_router:+"    ServerAlias ${ip_pub}"} "    ProxyPreserveHost On" \
+        "    ProxyPass / http://127.0.0.1:${PORT}/" "    ProxyPassReverse / http://127.0.0.1:${PORT}/" "</VirtualHost>" > "$kurz_datei"
+      if [ "$kurz_web" = "apache2" ]; then a2enmod -q proxy proxy_http >/dev/null; a2ensite -q trs-license-setup.conf >/dev/null; apache2ctl configtest >/dev/null 2>&1 && systemctl reload apache2 || { say "    Apache-Konfigtest schlaegt fehl — Kurzzeit-Eintrag wieder entfernt." "    Apache config test fails — temporary entry removed again."; kurz_weg; }
+      else httpd -t >/dev/null 2>&1 && systemctl reload httpd || { say "    httpd -t schlaegt fehl — Kurzzeit-Eintrag wieder entfernt." "    httpd -t fails — temporary entry removed again."; kurz_weg; }; fi
+    fi
+    if [ -n "$kurz_datei" ]; then
+      trap 'echo; kurz_weg; exit 130' INT TERM
+      trap 'kurz_weg' EXIT
+      echo ""
+      say "==> Oeffne jetzt im Browser:  http://${ip}   und gib den Setup-Code von oben ein." "==> Now open in your browser:  http://${ip}   and enter the setup code from above."
+      say "    Waehle im Assistenten „Hinter eigenem Proxy“ und trage deine Domain ein — der Installer" "    In the wizard choose “Behind your own proxy” and enter your domain — the installer"
+      say "    legt danach den Virtual Host und das Zertifikat dafuer an. (Strg+C bricht ab.)" "    then creates the virtual host and the certificate for it. (Ctrl+C cancels.)"
+      echo -n "    $(s "Warte auf die Einrichtung" "Waiting for the setup") "
+      for _ in $(seq 1 720); do setup_fertig && break; echo -n "."; sleep 10; done
+      echo ""
+      kurz_weg
+      trap - INT TERM EXIT
+      if setup_fertig; then
+        neu=$(setup_wert net domain | tr 'A-Z' 'a-z' || true)
+        if [[ "$neu" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
+          DOMAIN="$neu"
+          if grep -q '^TRS_PROXY_DOMAIN=' .env; then sed -i "s|^TRS_PROXY_DOMAIN=.*|TRS_PROXY_DOMAIN=$DOMAIN|" .env; else echo "TRS_PROXY_DOMAIN=$DOMAIN" >> .env; fi
+          say "==> Einrichtung abgeschlossen. Domain aus dem Assistenten: $DOMAIN" "==> Setup complete. Domain from the wizard: $DOMAIN"
+          vhost_einrichten
+          if [ -n "$vhost_angelegt" ]; then
+            if [ -n "${https_ok:-}" ]; then say "==> Fertig. TRS License laeuft unter  https://${DOMAIN}" "==> Done. TRS License runs at  https://${DOMAIN}"; else say "==> Fertig. TRS License laeuft unter  http://${DOMAIN}  (HTTPS: certbot --nginx -d ${DOMAIN} --redirect)" "==> Done. TRS License runs at  http://${DOMAIN}  (HTTPS: certbot --nginx -d ${DOMAIN} --redirect)"; fi
+            exit 0
+          fi
+        else
+          say "==> Einrichtung abgeschlossen, aber ohne Domain. Spaeter:  sudo bash install.sh --domain lizenz.deinefirma.de" "==> Setup complete, but without a domain. Later:  sudo bash install.sh --domain license.example.com"
+          exit 0
+        fi
+      else
+        say "==> Zeit abgelaufen. Einfach nochmal:  sudo bash install.sh" "==> Time is up. Simply run again:  sudo bash install.sh"
+        exit 0
+      fi
+    fi
+  else
+    direkt_freigeben   # „Nein“ oder kein Webserver: einfach die IP mit dem gewaehlten Port
+  fi
+fi
+if [ -n "$direkt_url" ]; then
+  say "==> Fertig. Oeffne im Browser:  ${direkt_url}" "==> Done. Open in your browser:  ${direkt_url}"
+elif [ "$MODUS" = "port" ]; then
   if [ -n "$vhost_angelegt" ]; then
-    if [ -n "${https_ok:-}" ]; then ziel_url="https://${DOMAIN}"; else ziel_url="http://${DOMAIN}"; fi
-    say "==> Fertig. Oeffne im Browser:  $ziel_url" "==> Done. Open in your browser:  $ziel_url"
+    if [ -n "${https_ok:-}" ]; then say "==> Fertig. Oeffne im Browser:  https://${DOMAIN}" "==> Done. Open in your browser:  https://${DOMAIN}"; else say "==> Fertig. Oeffne im Browser:  http://${DOMAIN}" "==> Done. Open in your browser:  http://${DOMAIN}"; fi
   else
     say "==> Fertig. Die App hoert auf 127.0.0.1:${PORT}. Trage in deinem Webserver einen Virtual Host ein:" "==> Done. The app listens on 127.0.0.1:${PORT}. Add a virtual host to your web server:"
     echo ""
@@ -590,10 +742,14 @@ if [ "$MODUS" = "port" ]; then
   fi
   say "    Im Assistenten ist „Hinter eigenem Proxy“ mit deiner Domain schon vorgewaehlt." "    In the wizard, “Behind your own proxy” with your domain is already preselected."
 else
-  ziel_url="http://${ip}"
-  say "==> Fertig. Oeffne im Browser:  $ziel_url" "==> Done. Open in your browser:  $ziel_url"
-  say "    Firewall: Port 80 und 443 muessen von aussen erreichbar sein." "    Firewall: ports 80 and 443 must be reachable from outside."
+  say "==> Fertig. Oeffne im Browser:  http://${ip}" "==> Done. Open in your browser:  http://${ip}"
+  say "    Firewall: Port 80 und 443 muessen von aussen erreichbar sein." "    Firewall: port 80 and 443 must be reachable from outside."
 fi
 say "    Den Setup-Code siehst du oben (oder: docker compose logs app | grep Setup-Code)." "    You can see the setup code above (or: docker compose logs app | grep Setup-Code)."
+# Abschluss: Adresse noch einmal gross
+ziel_url=""
+if [ -n "$direkt_url" ]; then ziel_url="$direkt_url"
+elif [ "$MODUS" = "port" ] && [ -n "${vhost_angelegt:-}" ] && [ -n "${DOMAIN:-}" ]; then ziel_url="$([ -n "${https_ok:-}" ] && echo https || echo http)://${DOMAIN}"
+elif [ "$MODUS" != "port" ]; then ziel_url="http://${ip}"; fi
 if [ -n "$ziel_url" ]; then echo ""; kasten "$G" "TRS License  ${Z_PUNKT}  $ziel_url"; fi
 echo ""
