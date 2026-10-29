@@ -132,6 +132,8 @@ updater_einrichten() {
 #!/usr/bin/env bash
 # TRS License — Update auf Anfrage aus dem Panel (angelegt von install.sh, systemd: trs-license-update.path)
 set -uo pipefail
+# cron (z. B. Unraid) startet mit sehr kurzem PATH
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\${PATH:-}"
 DIR="$PWD"; UPD="$PWD/update"; QUELLE="$QUELLE"
 cd "\$DIR" || exit 1
 [ -f "\$UPD/.update-anfrage" ] || exit 0
@@ -164,6 +166,31 @@ SKRIPT
     printf '%s\n' "[Unit]" "Description=TRS License: Update-Anfrage aus dem Panel" "[Path]" "PathExists=$PWD/update/.update-anfrage" "[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/trs-license-update.path
     printf '%s\n' "[Unit]" "Description=TRS License aktualisieren" "[Service]" "Type=oneshot" "ExecStart=/usr/local/bin/trs-license-update" > /etc/systemd/system/trs-license-update.service
     if systemctl daemon-reload && systemctl enable --now trs-license-update.path >/dev/null 2>&1; then ausloeser="systemd"; rm -f /etc/cron.d/trs-license-update; fi
+  fi
+  # Unraid: kein systemd, /etc und /usr/local liegen im Arbeitsspeicher (nach dem Neustart weg), und cron liest
+  # /etc/cron.d als Crontabs je Benutzer (Datei „root“, ohne Benutzerfeld) — eine eigene Datei dort laeuft nie.
+  # update_cron baut die root-Crontab aus /boot/config/plugins/dynamix/*.cron (+ Ordner installierter Plugins mit .plg)
+  # — bei jedem Start und jeder Zeitplan-Aenderung. Darum: Dienst auf den USB-Stick, Zeitplan nach dynamix/.
+  if [ -z "$ausloeser" ] && [ -f /etc/unraid-version ] && [ -d /boot/config ]; then
+    mkdir -p /boot/config/plugins/trs-license /boot/config/plugins/dynamix
+    cp -f /usr/local/bin/trs-license-update /boot/config/plugins/trs-license/trs-license-update
+    local zeile="* * * * * [ -f \"$PWD/update/.update-anfrage\" ] && bash /boot/config/plugins/trs-license/trs-license-update >/dev/null 2>&1"
+    printf '%s\n' "# TRS License: Update-Anfrage aus dem Panel (angelegt von install.sh)" "$zeile" "" > /boot/config/plugins/dynamix/trs-license-update.cron
+    rm -f /etc/cron.d/trs-license-update
+    # steht der Eintrag in der Crontab, die Unraid-cron liest? (ohne Pipe: install.sh laeuft mit pipefail)
+    trs_cron_drin() { local alle; alle="$(cat /etc/cron.d/root 2>/dev/null || true)"; case "$alle" in *plugins/trs-license/trs-license-update*) return 0 ;; esac; return 1; }
+    # 1. Unraid-Weg
+    if [ -x /usr/local/sbin/update_cron ]; then /usr/local/sbin/update_cron >/dev/null 2>&1 || true; fi
+    # 2. update_cron fehlt oder liest dynamix/ nicht: direkt in die root-Crontab und cron neu laden lassen
+    if ! trs_cron_drin && [ -d /etc/cron.d ]; then
+      { cat /etc/cron.d/root 2>/dev/null || true; echo "$zeile"; } > /tmp/trs-license-cron.$$ && cat /tmp/trs-license-cron.$$ > /etc/cron.d/root
+      rm -f /tmp/trs-license-cron.$$; crontab /etc/cron.d/root -c /etc/cron.d >/dev/null 2>&1 || true
+    fi
+    if trs_cron_drin; then ausloeser="cron (Unraid)"
+    else
+      DIENST_GRUND="$(s "Unraid: der Zeitplan liess sich nicht eintragen" "Unraid: the schedule could not be added") (Unraid $(cat /etc/unraid-version 2>/dev/null | tr -dc '0-9.' | head -c 12), update_cron: $([ -x /usr/local/sbin/update_cron ] && echo ja || echo nein), /etc/cron.d: $(ls /etc/cron.d 2>/dev/null | tr '\n' ' '), crond: $(pgrep -x crond >/dev/null 2>&1 && echo laeuft || echo aus))."
+      return 1
+    fi
   fi
   # Ohne systemd (z. B. Container-Server, Alpine): cron schaut jede Minute nach einer Anfrage
   if [ -z "$ausloeser" ] && [ -d /etc/cron.d ] && { pgrep -x cron >/dev/null 2>&1 || pgrep -x crond >/dev/null 2>&1; }; then
@@ -273,9 +300,28 @@ grep -q 'compose.port.yml' .env && MODUS="port" || MODUS="caddy"
 # 5. Update-Ordner: die App (Benutzer node, UID 1000) legt dort Anfragen ab, der Dienst auf dem Server antwortet
 mkdir -p update && chown 1000:1000 update 2>/dev/null || true
 
+# Passt das Datenbank-Passwort der .env nicht mehr zur Datenbank (.env neu angelegt, das Daten-Volume ist aber das
+# alte — etwa nach einem Unraid-Neustart oder einer zweiten Installation), kommt die App nie an ihre Daten (502).
+# Im Datenbank-Container geht der lokale Socket ohne Passwort: darueber das Passwort der .env setzen, Daten bleiben.
+# Geprueft wird ueber die Netz-Adresse des Containers (wie die App) — 127.0.0.1 ist dort ohne Passwort erlaubt.
+# Rueckgabe: 0 = passt, 2 = angeglichen (App neu gestartet), 1 = liess sich nicht angleichen
+db_passwort_angleichen() {
+  local i
+  [ -n "$(docker compose ps -q db 2>/dev/null)" ] || return 0
+  for i in $(seq 1 30); do docker compose exec -T db pg_isready -q >/dev/null 2>&1 && break; sleep 1; done
+  docker compose exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$(hostname -i 2>/dev/null | cut -d" " -f1)" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select 1"' >/dev/null 2>&1 && return 0
+  printf '%s\n' "ALTER USER CURRENT_USER PASSWORD :'pw';" | docker compose exec -T db sh -c 'psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v pw="$POSTGRES_PASSWORD"' >/dev/null 2>&1 || return 1
+  docker compose exec -T db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$(hostname -i 2>/dev/null | cut -d" " -f1)" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select 1"' >/dev/null 2>&1 || return 1
+  docker compose restart app >/dev/null 2>&1 || true
+  return 2
+}
+
 # 6. Starten
 say "==> Image wird geladen und gestartet …" "==> Pulling the image and starting …"
 if [ -d .output ]; then docker compose up -d --build; else docker compose pull -q && docker compose up -d; fi
+db_rc=0; db_passwort_angleichen || db_rc=$?
+if [ "$db_rc" = 2 ]; then say "    Das Datenbank-Passwort passte nicht zur .env — angeglichen (Daten bleiben)." "    The database password did not match .env — fixed (data kept)."
+elif [ "$db_rc" = 1 ]; then say "    FEHLER: Das Datenbank-Passwort passt nicht zur .env und liess sich nicht angleichen." "    ERROR: The database password does not match .env and could not be fixed."; fi
 
 # 7. Update-Dienst einrichten (Funktion steht oben)
 [ "${TRS_DRY_RUN:-}" = "1" ] || updater_einrichten || say "    Update-Dienst nicht eingerichtet: $DIENST_GRUND" "    Update service not set up: $DIENST_GRUND"
