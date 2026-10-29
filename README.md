@@ -50,7 +50,7 @@ Im Leerlauf brauchen App und Datenbank zusammen rund 60 MB RAM.
 curl -fsSL https://raw.githubusercontent.com/theredstonee/trs-license-docker/main/install.sh | sudo bash
 ```
 
-Das Skript legt alles nach **`/opt/trs-license`** (anderer Ordner: `curl … | sudo TRS_DIR=/srv/trs-license bash`), installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, startet alles, richtet den Update-Dienst ein und zeigt dir am Ende die Adresse und den **Setup-Code**. Öffne die Adresse im Browser und folge dem Assistenten. Sprache des Installers: Deutsch oder Englisch (`--lang en`).
+Das Skript legt alles nach **`/opt/trs-license`** (anderer Ordner: `curl … | sudo TRS_DIR=/srv/trs-license bash`; auf **Unraid** nach `/mnt/user/appdata/trs-license`, weil dort alles außerhalb von `/boot` und `/mnt` nach einem Neustart weg ist — eine bestehende Installation in `/opt` zieht beim nächsten Update von selbst um), installiert Docker (falls nötig), erzeugt ein Datenbank-Passwort, startet alles, richtet den Update-Dienst ein und zeigt dir am Ende die Adresse und den **Setup-Code**. Öffne die Adresse im Browser und folge dem Assistenten. Sprache des Installers: Deutsch oder Englisch (`--lang en`).
 
 <details>
 <summary>Lieber von Hand?</summary>
