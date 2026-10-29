@@ -26,6 +26,9 @@ else
   echo "==> TRS License: $ZIEL"
   mkdir -p "$ZIEL" && cd "$ZIEL"
   for f in $DATEIEN; do curl -fsSL -o "$f" "$QUELLE/$f" || { [ "$f" = "version.json" ] || [ "$f" = ".env.example" ] || { echo "ERROR: $f"; exit 1; }; }; done
+  # Rest des Skripts aus der curl-Leitung leer lesen: exec schliesst sie sonst, waehrend curl noch schreibt
+  # (Meldung „curl: (23) Failure writing output to destination“ am Ende, obwohl alles geklappt hat)
+  [ -t 0 ] || cat >/dev/null 2>&1 || true
   if { true </dev/tty; } 2>/dev/null; then exec bash ./install.sh "$@" </dev/tty; else exec bash ./install.sh "$@"; fi
 fi
 
