@@ -1,20 +1,14 @@
 {
-  "version": "1.4.2",
-  "datum": "2026-10-29",
+  "version": "1.4.3",
+  "datum": "2026-10-31",
   "hinweise": {
     "de": [
-      "Neu: Live-Protokoll beim Update im Panel — du siehst, was der Server gerade macht (Image laden, Neustart, Selbsttest)",
-      "Schlägt ein Update fehl oder holt der Server es nicht ab, bleibt der Fehler samt Protokoll im Fenster stehen, mit dem Befehl zum Beheben",
-      "update.sh zeigt Schritte mit Nummer, einen Spinner mit laufenden Sekunden und bei Fehlern die letzten Zeilen der Ausgabe in Rot",
-      "Behoben: Der Rücksprung auf die vorherige Fassung nach einem fehlgeschlagenen Selbsttest klappt jetzt auch mit neueren Docker-Versionen (containerd-Speicher)",
-      "Behoben: Bei der Installation per curl | sudo bash erschien am Ende „curl: (23) Failure writing output“, obwohl alles geklappt hatte"
+      "Einrichtung hinter eigenem Webserver: Der Assistent erkennt jetzt, wenn die Installation ohne eigenen Caddy läuft, und bietet „Eigene Domain“ dort nicht mehr an (das konnte nie funktionieren). Stattdessen richtet er nginx oder Apache samt Virtual Host, HTTPS (Let’s Encrypt) und HSTS auf Knopfdruck selbst ein — mit Live-Protokoll.",
+      "Sicherheit: Der Update-Dienst auf dem Server schreibt Status- und Protokolldateien jetzt so, dass ihm keine untergeschobene Verknüpfung aus dem TRS-License-Container mehr Dateien auf dem Server überschreiben lassen kann. Bitte zeitnah aktualisieren."
     ],
     "en": [
-      "New: live log during updates in the panel — you see what the server is doing (pulling the image, restart, self-test)",
-      "If an update fails or the server does not pick it up, the error stays in the window with the log and the command to fix it",
-      "update.sh shows numbered steps, a spinner with running seconds and, on errors, the last lines of output in red",
-      "Fixed: rolling back to the previous version after a failed self-test now also works with newer Docker versions (containerd store)",
-      "Fixed: installing via curl | sudo bash no longer ends with “curl: (23) Failure writing output” although everything worked"
+      "Setup behind your own web server: the wizard now detects installations without their own Caddy and no longer offers “Own domain” there (it could never work). Instead it sets up nginx or Apache including the virtual host, HTTPS (Let’s Encrypt) and HSTS with one click — with a live log.",
+      "Security: the update service on the server now writes its status and log files so that a planted link from the TRS-License container can no longer make it overwrite files on the server. Please update soon."
     ]
   }
 }
