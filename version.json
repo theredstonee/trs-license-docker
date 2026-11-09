@@ -1,12 +1,14 @@
 {
-  "version": "1.4.5",
-  "datum": "2026-11-02",
+  "version": "1.4.6",
+  "datum": "2026-11-08",
   "hinweise": {
     "de": [
-      "Symbole haben überall eine feste Standardgröße und werden nicht mehr übergroß."
+      "Externe Server „nicht auflösbar“, obwohl der Name auf dem Server selbst funktioniert: Scheitert das DNS im Container (etwa weil der Server einen lokalen Resolver nutzt oder der Weg nach außen gesperrt ist), fragt TRS License jetzt direkt öffentliche DNS-Server und merkt sich die letzte funktionierende Adresse. Das gilt für Webhooks, E-Mail-Versand und Zahlungsanbieter.",
+      "Im Container-Log steht dann, welcher Name über den Ausweg aufgelöst wurde. Abschalten lässt sich das mit DNS_AUSWEICH=0 in der .env."
     ],
     "en": [
-      "Icons have a fixed default size everywhere and no longer turn oversized."
+      "External servers “cannot be resolved” although the name works on the server itself: if DNS fails inside the container (for example because the server uses a local resolver or outbound DNS is blocked), TRS License now asks public DNS servers directly and remembers the last working address. This applies to webhooks, e-mail delivery and payment providers.",
+      "The container log then shows which name was resolved through the fallback. It can be turned off with DNS_AUSWEICH=0 in the .env."
     ]
   }
 }
